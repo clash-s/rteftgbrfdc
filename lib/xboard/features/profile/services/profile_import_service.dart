@@ -39,13 +39,20 @@ class XBoardProfileImportService {
     final stopwatch = Stopwatch()..start();
     try {
       _logger.info('开始导入订阅配置: $url');
-      onProgress?.call(ImportStatus.cleaning, 0.2, '清理旧的订阅配置');
-      await _cleanOldUrlProfiles();
-      onProgress?.call(ImportStatus.downloading, 0.6, '下载配置文件');
+      
+      // 1. 先下载并验证新配置（不删除旧配置）
+      onProgress?.call(ImportStatus.downloading, 0.3, '下载配置文件');
       final profile = await _downloadAndValidateProfile(url);
-      onProgress?.call(ImportStatus.validating, 0.8, '验证配置格式');
-      onProgress?.call(ImportStatus.adding, 1.0, '添加到配置列表');
+      onProgress?.call(ImportStatus.validating, 0.6, '验证配置格式');
+      
+      // 2. 下载成功后，再清理旧配置（避免 UI 闪烁显示"无订阅"）
+      onProgress?.call(ImportStatus.cleaning, 0.8, '替换旧的订阅配置');
+      await _cleanOldUrlProfiles();
+      
+      // 3. 添加新配置
+      onProgress?.call(ImportStatus.adding, 0.9, '添加到配置列表');
       await _addProfile(profile);
+      
       stopwatch.stop();
       onProgress?.call(ImportStatus.success, 1.0, '导入成功');
       _logger.info('订阅配置导入成功，耗时: ${stopwatch.elapsedMilliseconds}ms');

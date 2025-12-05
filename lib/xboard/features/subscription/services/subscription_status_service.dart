@@ -36,6 +36,7 @@ class SubscriptionStatusService {
   SubscriptionStatusResult checkSubscriptionStatus({
     required UserAuthState userState,
     fl_models.SubscriptionInfo? profileSubscriptionInfo,
+    bool isRefreshing = false,
   }) {
     // 🔧 DEBUG: 强制显示过期提醒对话框，方便调试
     const bool debugForceExpired = false;
@@ -61,6 +62,15 @@ class SubscriptionStatusService {
     
     // 只使用 profileSubscriptionInfo 作为数据源
     if (profileSubscriptionInfo == null) {
+      // 如果正在刷新订阅，返回"刷新中"状态而非"无订阅"，避免 UI 短暂显示购买订阅
+      if (isRefreshing) {
+        return SubscriptionStatusResult(
+          type: SubscriptionStatusType.valid,
+          messageBuilder: (context) => AppLocalizations.of(context).subscriptionValid,
+          detailMessageBuilder: null,
+          needsDialog: false,
+        );
+      }
       return SubscriptionStatusResult(
         type: SubscriptionStatusType.noSubscription,
         messageBuilder: (context) => AppLocalizations.of(context).subscriptionNoSubscription,
