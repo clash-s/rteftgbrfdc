@@ -1,5 +1,5 @@
 import 'package:fl_clash/pages/pages.dart';
-import 'package:fl_clash/xboard/infrastructure/providers/repository_providers.dart';
+import 'package:fl_clash/xboard/features/auth/providers/xboard_user_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fl_clash/xboard/utils/xboard_notification.dart';
@@ -24,10 +24,9 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage> {
       _errorMessage = null;
     });
     try {
-      // 使用 SubscriptionRepository 获取订阅信息
-      final subscriptionRepo = ref.read(subscriptionRepositoryProvider);
-      final result = await subscriptionRepo.getSubscription();
-      final subscriptionInfo = result.dataOrNull;
+      // 使用 xboardUserProvider 获取订阅信息
+      final userAuthState = ref.read(xboardUserProvider);
+      final subscriptionInfo = userAuthState.subscriptionInfo;
       
       if (mounted) {
         setState(() {

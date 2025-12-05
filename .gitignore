@@ -35,6 +35,10 @@ migrate_working_dir/
 /build/
 /dist/
 
+# Generated files (build_runner, freezed, etc.)
+*.g.dart
+*.freezed.dart
+
 # Symbolication related
 app.*.symbols
 

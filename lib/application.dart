@@ -17,7 +17,8 @@ import 'package:go_router/go_router.dart';
 import 'controller.dart';
 import 'pages/pages.dart';
 import 'xboard/xboard.dart';
-import 'package:fl_clash/xboard/sdk/xboard_sdk.dart';
+import 'package:flutter_xboard_sdk/flutter_xboard_sdk.dart';
+import 'package:fl_clash/xboard/adapter/initialization/sdk_provider.dart';
 import 'package:fl_clash/xboard/features/online_support/providers/websocket_auto_connector.dart';
 import 'package:fl_clash/xboard/router/app_router.dart' as xboard_router;
 import 'package:fl_clash/xboard/features/auth/auth.dart';
@@ -57,6 +58,11 @@ class ApplicationState extends ConsumerState<Application> {
     _autoUpdateGroupTask();
     _autoUpdateProfilesTask();
     globalState.appController = AppController(context, ref);
+    
+    // 预热 XBoard SDK（后台异步初始化，不阻塞UI）
+    // SDK 会进行域名竞速、加载证书、配置 HTTP 服务
+    Future.microtask(() => ref.read(xboardSdkProvider.future));
+    
     WidgetsBinding.instance.addPostFrameCallback((timeStamp) async {
       final currentContext = globalState.navigatorKey.currentContext;
       if (currentContext != null) {
@@ -309,7 +315,7 @@ class ApplicationState extends ConsumerState<Application> {
       
       // 释放XBoard SDK资源
       try {
-        XBoardSDK.dispose();
+        XBoardSDK.instance.dispose();
       // ignore: empty_catches
       } catch (e) {
       }

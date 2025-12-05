@@ -22,7 +22,7 @@ import 'common/common.dart';
 import 'models/models.dart';
 import 'package:fl_clash/xboard/features/remote_task/remote_task_manager.dart'; // 导入远程任务管理器
 
-import 'package:fl_clash/xboard/sdk/xboard_sdk.dart'; // 导入域名服务
+import 'package:flutter_xboard_sdk/flutter_xboard_sdk.dart'; // 导入域名服务
 
 // 定义一个全局变量来持有 RemoteTaskManager 实例，方便在整个应用生命周期中访问和管理
 RemoteTaskManager? remoteTaskManager;
@@ -103,16 +103,9 @@ Future<void> _initializeXBoardServices() async {
     await XBoardConfig.initialize(settings: configSettings);
     print('[Main] XBoard配置模块初始化成功');
     
-    // 3. 获取SDK配置
-    final sdkConfig = await ConfigFileLoaderHelper.getSdkConfig();
-    
-    // 4. 初始化XBoard SDK（使用域名竞速）
-    await XBoardSDK.initialize(
-      configProvider: XBoardConfig.provider,
-      baseUrl: null, // 没有基础URL，使用域名竞速自动选择最快的
-    );
-    
-    print('[Main] XBoard SDK初始化成功');
+    // SDK 初始化已移至 xboardSdkProvider，由 Riverpod 统一管理
+    // 在 Application.initState 中会预热 SDK
+    print('[Main] SDK 将在应用启动后由 xboardSdkProvider 初始化');
     
   } catch (e) {
     print('[Main] XBoard服务初始化失败: $e');
@@ -130,7 +123,7 @@ class AppLifecycleObserver extends WidgetsBindingObserver {
     // 当应用被完全终止时（例如，从任务管理器中划掉），释放资源
     if (state == AppLifecycleState.detached) {
       remoteTaskManager?.dispose();
-      XBoardSDK.dispose(); // 释放SDK资源
+      XBoardSDK.instance.dispose(); // 释放SDK资源
       print('应用生命周期状态改变: $state, 所有服务资源已释放。');
     }
   }

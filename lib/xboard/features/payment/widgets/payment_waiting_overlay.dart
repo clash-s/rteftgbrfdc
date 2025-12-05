@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:fl_clash/common/common.dart';
-import 'package:fl_clash/xboard/infrastructure/providers/repository_providers.dart';
+import 'package:flutter_xboard_sdk/flutter_xboard_sdk.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fl_clash/xboard/core/core.dart';
 import 'package:fl_clash/l10n/l10n.dart';
@@ -104,14 +104,17 @@ class _PaymentWaitingOverlayState extends ConsumerState<PaymentWaitingOverlay>
         _logger.debug('[PaymentWaiting] ===== 开始检测支付状态 =====');
         _logger.debug('[PaymentWaiting] 订单号: $_currentTradeNo');
         
-        // 使用 OrderRepository 检查订单状态
-        _logger.debug('[支付等待] 准备调用 OrderRepository.getOrderByTradeNo');
-        final orderRepo = ref.read(orderRepositoryProvider);
-        final result = await orderRepo.getOrderByTradeNo(_currentTradeNo!);
-        final orderData = result.dataOrNull;
-        _logger.debug('[PaymentWaiting] API 调用完成，结果: ${orderData != null ? '有数据' : '无数据'}');
+        // 使用 SDK 检查订单状态
+        _logger.debug('[支付等待] 准备调用 SDK getOrders');
+        final orderModels = await XBoardSDK.instance.order.getOrders();
+        final orderData = orderModels.firstWhere(
+          (o) => o.tradeNo == _currentTradeNo,
+          orElse: () => const OrderModel(status: -1),
+        );
         
-        if (orderData != null) {
+        _logger.debug('[PaymentWaiting] API 调用完成，结果: ${orderData.status != -1 ? '有数据' : '无数据'}');
+        
+        if (orderData.status != -1) {
           _logger.debug('[PaymentWaiting] 订单详情 - 订单号: ${orderData.tradeNo}, 状态: ${orderData.status}');
           // 检查订单状态
           // 状态值: 0-等待中, 3-已完成, 其他-失败

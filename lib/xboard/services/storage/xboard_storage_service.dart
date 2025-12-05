@@ -28,7 +28,6 @@ class XBoardStorageService {
   static const String _savedPasswordKey = 'xboard_saved_password';
   static const String _rememberPasswordKey = 'xboard_remember_password';
 
-  // ===== 用户邮箱 =====
 
   Future<Result<bool>> saveUserEmail(String email) async {
     return await _storage.setString(_userEmailKey, email);
@@ -37,35 +36,6 @@ class XBoardStorageService {
   Future<Result<String?>> getUserEmail() async {
     return await _storage.getString(_userEmailKey);
   }
-
-  // ===== 用户信息 =====
-
-  Future<void> saveUserInfo(sdk.UserInfo userInfo) async {
-    try {
-      final userInfoJson = jsonEncode(userInfo.toJson());
-      await _storage.setString(_userInfoKey, userInfoJson);
-    } catch (e) {
-      // 忽略错误
-    }
-  }
-
-  Future<sdk.UserInfo?> loadUserInfo() async {
-    final result = await _storage.getString(_userInfoKey);
-    return result.when(
-      success: (userInfoJson) {
-        if (userInfoJson == null) return null;
-        try {
-          final Map<String, dynamic> userInfoMap = jsonDecode(userInfoJson);
-          return sdk.UserInfo.fromJson(userInfoMap);
-        } catch (e) {
-          return null;
-        }
-      },
-      failure: (error) => null,
-    );
-  }
-
-  // ===== 领域模型：用户信息 =====
 
   Future<Result<bool>> saveDomainUser(DomainUser user) async {
     try {
@@ -141,32 +111,7 @@ class XBoardStorageService {
     );
   }
 
-  // ===== 订阅信息（保留兼容） =====
-
-  Future<void> saveSubscriptionInfo(sdk.SubscriptionInfo subscriptionInfo) async {
-    try {
-      final subscriptionInfoJson = jsonEncode(subscriptionInfo.toJson());
-      await _storage.setString(_subscriptionInfoKey, subscriptionInfoJson);
-    } catch (e) {
-      // 忽略错误
-    }
-  }
-
-  Future<sdk.SubscriptionInfo?> loadSubscriptionInfo() async {
-    final result = await _storage.getString(_subscriptionInfoKey);
-    return result.when(
-      success: (subscriptionInfoJson) {
-        if (subscriptionInfoJson == null) return null;
-        try {
-          final Map<String, dynamic> subscriptionInfoMap = jsonDecode(subscriptionInfoJson);
-          return sdk.SubscriptionInfo.fromJson(subscriptionInfoMap);
-        } catch (e) {
-          return null;
-        }
-      },
-      failure: (error) => null,
-    );
-  }
+  // ===== 订阅信息（已移除，使用DomainSubscription代替） =====
 
   // ===== 认证数据清理 =====
 

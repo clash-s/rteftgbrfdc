@@ -1,6 +1,6 @@
 import 'package:fl_clash/xboard/core/core.dart';
 import 'package:fl_clash/xboard/config/xboard_config.dart';
-import 'package:fl_clash/xboard/sdk/xboard_sdk.dart';
+// SDK通过Provider自动初始化
 
 // 初始化文件级日志器
 final _logger = FileLogger('domain_status_service.dart');
@@ -129,15 +129,11 @@ class DomainStatusService {
   Future<void> _initializeXBoardService(String domain) async {
     try {
       _logger.info('初始化XBoard服务: $domain');
-      // 使用当前域名重新初始化XBoard服务
-      await XBoardSDK.initialize(
-        configProvider: XBoardConfig.provider,
-        baseUrl: domain,
-      );
-      
-      _logger.info('XBoard服务初始化成功');
+      // SDK现在通过Provider自动初始化，无需手动调用
+      // 域名竞速结果会被XBoardConfig记录，SDK Provider会自动使用
+      _logger.info('XBoard服务将在需要时自动初始化');
     } catch (e) {
-      _logger.error('XBoard服务初始化失败', e);
+      _logger.error('XBoard服务检查失败', e);
       // 不抛出异常，因为域名检查已经成功
     }
   }

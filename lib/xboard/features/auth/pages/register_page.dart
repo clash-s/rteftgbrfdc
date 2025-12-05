@@ -1,12 +1,12 @@
 import 'package:fl_clash/xboard/features/auth/auth.dart';
-import 'package:fl_clash/xboard/infrastructure/providers/repository_providers.dart';
+import 'package:flutter_xboard_sdk/flutter_xboard_sdk.dart';
 import 'package:fl_clash/common/common.dart';
 import 'package:flutter/material.dart';
 import 'package:fl_clash/xboard/utils/xboard_notification.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fl_clash/xboard/features/shared/shared.dart';
 import 'package:fl_clash/xboard/services/services.dart';
-import 'package:fl_clash/xboard/sdk/xboard_sdk.dart' show ConfigData;
+import 'package:flutter_xboard_sdk/flutter_xboard_sdk.dart' show ConfigModel;
 import 'package:go_router/go_router.dart';
 class RegisterPage extends ConsumerStatefulWidget {
   const RegisterPage({super.key});
@@ -59,10 +59,10 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
       });
       try {
         // 使用 AuthRepository 注册
-        final authRepo = ref.read(authRepositoryProvider);
-        final result = await authRepo.register(
-          email: _emailController.text,
-          password: _passwordController.text,
+        // 使用 SDK 注册
+        final success = await XBoardSDK.instance.auth.register(
+          _emailController.text,
+          _passwordController.text,
           inviteCode: _inviteCodeController.text.trim().isNotEmpty 
               ? _inviteCodeController.text 
               : null,
@@ -71,8 +71,8 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
               : null,
         );
         
-        if (result.isFailure) {
-          throw Exception(result.exceptionOrNull?.message ?? '注册失败');
+        if (!success) {
+          throw Exception('注册失败');
         }
         
         // 注册成功
@@ -156,8 +156,8 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
 
     try {
       // 使用 AuthRepository 发送验证码
-      final authRepo = ref.read(authRepositoryProvider);
-      await authRepo.sendVerificationCode(_emailController.text);
+      // 使用 SDK 发送验证码
+      await XBoardSDK.instance.auth.sendEmailVerifyCode(_emailController.text);
 
       if (mounted) {
         XBoardNotification.showSuccess(appLocalizations.verificationCodeSentCheckEmail);
@@ -195,6 +195,26 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
     );
   }
 
+  Widget _buildInviteCodeField(ConfigModel? config) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final configAsync = ref.watch(configProvider);
+    
+    // 处理异步加载状态
+    return configAsync.when(
+      loading: () => const SizedBox.shrink(), // Or a placeholder
+      error: (error, stack) => const SizedBox.shrink(), // Or an error message
+      data: (configData) => XBInputField(
+        controller: _inviteCodeController,
+        labelText: (configData?.isInviteForce ?? false)
+            ? '${appLocalizations.xboardInviteCode} *' 
+            : appLocalizations.inviteCodeOptional,
+        hintText: appLocalizations.pleaseEnterInviteCode,
+        prefixIcon: Icons.card_giftcard_outlined,
+        enabled: true,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -211,7 +231,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
     );
   }
   
-  Widget _buildPage(BuildContext context, ColorScheme colorScheme, ConfigData? config) {
+  Widget _buildPage(BuildContext context, ColorScheme colorScheme, ConfigModel? config) {
     return Scaffold(
       backgroundColor: colorScheme.surface,
       body: XBContainer(

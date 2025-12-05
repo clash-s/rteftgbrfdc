@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:fl_clash/xboard/utils/xboard_notification.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fl_clash/xboard/features/shared/shared.dart';
-import 'package:fl_clash/xboard/infrastructure/providers/repository_providers.dart';
+import 'package:flutter_xboard_sdk/flutter_xboard_sdk.dart';
 import 'package:fl_clash/l10n/l10n.dart';
 import 'package:go_router/go_router.dart';
 
@@ -48,9 +48,8 @@ class _ForgotPasswordPageState extends ConsumerState<ForgotPasswordPage> {
     });
     
     try {
-      // 使用 AuthRepository 发送验证码
-      final authRepo = ref.read(authRepositoryProvider);
-      await authRepo.sendVerificationCode(_emailController.text);
+      // 使用 SDK 发送验证码
+      await XBoardSDK.instance.auth.sendEmailVerifyCode(_emailController.text);
       
       if (mounted) {
         setState(() {
@@ -87,15 +86,15 @@ class _ForgotPasswordPageState extends ConsumerState<ForgotPasswordPage> {
     
     try {
       // 使用 AuthRepository 重置密码
-      final authRepo = ref.read(authRepositoryProvider);
-      final result = await authRepo.resetPassword(
-        email: _emailController.text,
-        password: _passwordController.text,
-        emailCode: _codeController.text,
+      // 使用 SDK 重置密码
+      final success = await XBoardSDK.instance.auth.forgotPassword(
+        _emailController.text,
+        _codeController.text,
+        _passwordController.text,
       );
       
-      if (result.isFailure) {
-        throw Exception(result.exceptionOrNull?.message ?? '重置密码失败');
+      if (!success) {
+        throw Exception('重置密码失败');
       }
       
       if (mounted) {

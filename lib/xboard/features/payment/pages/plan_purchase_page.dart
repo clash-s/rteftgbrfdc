@@ -7,9 +7,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:fl_clash/l10n/l10n.dart';
 import 'package:fl_clash/widgets/widgets.dart';
 import 'package:fl_clash/xboard/domain/domain.dart';
-import 'package:fl_clash/xboard/sdk/xboard_sdk.dart' show XBoardSDK, CouponData;
+import 'package:flutter_xboard_sdk/flutter_xboard_sdk.dart' show XBoardSDK, CouponModel;
 import 'package:fl_clash/xboard/core/core.dart';
-import 'package:fl_clash/xboard/infrastructure/providers/repository_providers.dart';
 import 'package:fl_clash/xboard/features/auth/providers/xboard_user_provider.dart';
 import 'package:fl_clash/xboard/features/payment/providers/xboard_payment_provider.dart';
 import '../widgets/payment_waiting_overlay.dart';
@@ -63,6 +62,9 @@ class _PlanPurchasePageState extends ConsumerState<PlanPurchasePage> {
   @override
   void initState() {
     super.initState();
+    // 确保 PaymentProvider 被初始化，以便开始加载支付方式
+    ref.read(xboardPaymentProvider);
+    
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final periods = _getAvailablePeriods(context);
       if (periods.isNotEmpty && _selectedPeriod == null) {  
@@ -85,10 +87,8 @@ class _PlanPurchasePageState extends ConsumerState<PlanPurchasePage> {
   Future<void> _loadUserBalance() async {
     setState(() => _isLoadingBalance = true);
     try {
-      // 使用 UserRepository 获取用户信息
-      final userRepo = ref.read(userRepositoryProvider);
-      final result = await userRepo.getUserInfo();
-      final userInfo = result.dataOrNull;
+      // 使用 xboardUserProvider 获取用户信息
+      final userInfo = ref.read(xboardUserProvider).userInfo;
       
       if (mounted) {
         setState(() => _userBalance = userInfo?.balanceInYuan);
@@ -194,9 +194,9 @@ class _PlanPurchasePageState extends ConsumerState<PlanPurchasePage> {
     try {
       final couponCode = _couponController.text.trim();
       // TODO: 将来添加到 PaymentRepository，目前保留使用 SDK
-      final couponData = await XBoardSDK.checkCoupon(
-        code: couponCode,
-        planId: widget.plan.id,
+      final couponData = await XBoardSDK.instance.order.checkCoupon(
+        _couponController.text.trim(),
+        widget.plan.id,
       );
 
       if (couponData != null && mounted) {
@@ -219,7 +219,7 @@ class _PlanPurchasePageState extends ConsumerState<PlanPurchasePage> {
     }
   }
 
-  void _applyCoupon(String code, CouponData couponData) {
+  void _applyCoupon(String code, CouponModel couponData) {
     final currentPrice = _getCurrentPrice();
     final discountAmount = PriceCalculator.calculateDiscountAmount(
       currentPrice,
@@ -331,10 +331,18 @@ class _PlanPurchasePageState extends ConsumerState<PlanPurchasePage> {
 
       _logger.debug('[购买] 实付金额: $actualPayAmount (优惠后价格: $displayFinalPrice, 余额抵扣: $balanceToUse)');
 
-      // 使用 PaymentRepository 获取支付方式
-      final paymentRepo = ref.read(paymentRepositoryProvider);
-      final paymentResult = await paymentRepo.getPaymentMethods();
-      final paymentMethods = paymentResult.dataOrNull ?? [];
+      // 使用 xboardAvailablePaymentMethodsProvider 获取支付方式
+      final paymentMethods = ref.read(xboardAvailablePaymentMethodsProvider);
+      
+      _logger.info('[购买] 获取到的支付方式数量: ${paymentMethods.length}');
+      if (paymentMethods.isNotEmpty) {
+        _logger.info('[购买] 支付方式列表:');
+        for (var method in paymentMethods) {
+          _logger.info('  - ${method.name} (id: ${method.id})');
+        }
+      } else {
+        _logger.error('[购买] ⚠️ 支付方式列表为空！');
+      }
       
       if (paymentMethods.isEmpty) {
         throw Exception('暂无可用的支付方式');
@@ -401,6 +409,10 @@ class _PlanPurchasePageState extends ConsumerState<PlanPurchasePage> {
     String tradeNo,
   ) async {
     if (methods.length == 1) {
+      // 单一支付方式，直接显示等待页面并返回
+      if (mounted) {
+        _showPaymentWaiting(tradeNo);
+      }
       return methods.first;
     }
 

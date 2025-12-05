@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:fl_clash/xboard/utils/xboard_notification.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:fl_clash/xboard/infrastructure/providers/repository_providers.dart';
+import 'package:flutter_xboard_sdk/flutter_xboard_sdk.dart';
 class PaymentGatewayPage extends ConsumerStatefulWidget {
   final String paymentUrl;
   final String tradeNo;
@@ -115,16 +115,42 @@ class _PaymentGatewayPageState extends ConsumerState<PaymentGatewayPage> {
       _isCheckingPayment = true;
     });
     try {
-      // 使用 OrderRepository 查询订单状态
-      final orderRepo = ref.read(orderRepositoryProvider);
-      final result = await orderRepo.getOrderByTradeNo(widget.tradeNo);
-      final order = result.dataOrNull;
+      // 使用 SDK 查询订单状态
+      final orderModels = await XBoardSDK.instance.order.getOrders();
+      // SDK getOrder(tradeNo) might not exist, getOrders() returns list.
+      // Need to find by tradeNo.
+      // Wait, OrderApi has getOrder()?
+      // Step 288: OrderApi has getOrder(), getPaymentMethods(), checkCoupon().
+      // Step 156: `getOrder` (singular) was missing in providers.
+      // Step 178: `OrderApi` interface: `Future<List<OrderModel>> getOrders();`
+      // It does NOT have `getOrderByTradeNo`.
+      // So I must fetch all orders and filter? Or `getOrders` supports query?
+      // SDK `getOrders` implementation?
+      // I'll assume I have to fetch all and find.
+      // Or maybe `XBoardSDK.instance.order.getOrder(tradeNo)` exists?
+      // I'll check `OrderApi` again.
+      // Step 178 view_file lines 1-14:
+      // `Future<List<OrderModel>> getOrders();`
+      // `Future<String> createOrder(...)`
+      // `Future<PaymentResultModel> checkoutOrder(...)`
+      // `Future<bool> cancelOrder(...)`
+      // `Future<List<PaymentMethodModel>> getPaymentMethods();`
+      // `Future<CouponModel> checkCoupon(...)`
+      // No `getOrder(tradeNo)`.
+      // So I must use `getOrders()` and filter.
+      
+      final order = orderModels.firstWhere(
+        (o) => o.tradeNo == widget.tradeNo,
+        orElse: () => const OrderModel(status: -1), // Dummy
+      );
+
       if (mounted) {
         setState(() {
           _isCheckingPayment = false;
         });
-        if (order != null) {
-          if (order.status == 2) {
+        if (order.status != -1) {
+          // status: 0=pending, 1=processing, 2=canceled, 3=completed
+          if (order.status == 3) {
             _stopAutoPolling();
             XBoardNotification.showSuccess('🎉 支付成功！');
             Future.delayed(const Duration(seconds: 1), () {
@@ -132,12 +158,12 @@ class _PaymentGatewayPageState extends ConsumerState<PaymentGatewayPage> {
                 Navigator.of(context).popUntil((route) => route.isFirst);
               }
             });
-          } else if (order.status == 3) {
+          } else if (order.status == 2) {
             _stopAutoPolling();
             if (!silent) {
               XBoardNotification.showInfo('支付已取消');
             }
-          } else if (order.status == 1) {
+          } else if (order.status == 0 || order.status == 1) {
             if (!silent) {
               XBoardNotification.showInfo(_autoPollingEnabled ? '正在等待支付...' : '订单状态：待支付');
             }

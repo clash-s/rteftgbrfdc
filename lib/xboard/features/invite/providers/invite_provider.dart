@@ -1,7 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fl_clash/xboard/core/core.dart';
 import 'package:fl_clash/xboard/domain/domain.dart';
-import 'package:fl_clash/xboard/infrastructure/providers/repository_providers.dart';
+import 'package:flutter_xboard_sdk/flutter_xboard_sdk.dart';
+import 'package:fl_clash/xboard/adapter/state/invite_state.dart';
+import 'package:fl_clash/xboard/adapter/state/user_state.dart';
 
 // 初始化文件级日志器
 final _logger = FileLogger('invite_provider.dart');
@@ -93,14 +95,10 @@ class InviteNotifier extends Notifier<InviteState> {
 
     try {
       _logger.info('加载邀请信息...');
-      final inviteRepo = ref.read(inviteRepositoryProvider);
-      final result = await inviteRepo.getInviteInfo();
+      _logger.info('加载邀请信息...');
+      final inviteInfoModel = await ref.read(getInviteInfoProvider.future);
+      final inviteData = _mapInviteInfo(inviteInfoModel);
 
-      if (result.isFailure) {
-        throw result.exceptionOrNull ?? Exception('加载邀请信息失败');
-      }
-
-      final inviteData = result.dataOrNull;
       state = state.copyWith(
         inviteData: inviteData,
         isLoading: false,
@@ -123,17 +121,10 @@ class InviteNotifier extends Notifier<InviteState> {
 
     try {
       _logger.info('加载佣金历史... 页码: $page');
-      final inviteRepo = ref.read(inviteRepositoryProvider);
-      final result = await inviteRepo.getCommissionHistory(
-        page: page,
-        pageSize: state.historyPageSize,
-      );
+      _logger.info('加载佣金历史... 页码: $page');
+      final commissionList = await ref.read(getCommissionDetailsProvider(page: page).future);
+      final newHistory = commissionList.map(_mapCommission).toList();
 
-      if (result.isFailure) {
-        throw result.exceptionOrNull ?? Exception('加载佣金历史失败');
-      }
-
-      final newHistory = result.dataOrNull ?? [];
 
       List<DomainCommission> updatedHistory;
       if (append && newHistory.isNotEmpty) {
@@ -170,14 +161,9 @@ class InviteNotifier extends Notifier<InviteState> {
   Future<void> loadUserInfo() async {
     try {
       _logger.info('加载用户信息...');
-      final userRepo = ref.read(userRepositoryProvider);
-      final result = await userRepo.getUserInfo();
-
-      if (result.isFailure) {
-        throw result.exceptionOrNull ?? Exception('加载用户信息失败');
-      }
-
-      final userInfo = result.dataOrNull;
+      _logger.info('加载用户信息...');
+      final userModel = await ref.read(getUserInfoProvider.future);
+      final userInfo = _mapUser(userModel);
       state = state.copyWith(userInfo: userInfo);
       _logger.info('用户信息加载成功: 钱包余额 ¥${(userInfo?.balanceInCents ?? 0) / 100.0}');
     } catch (e) {
@@ -192,19 +178,24 @@ class InviteNotifier extends Notifier<InviteState> {
 
     try {
       _logger.info('生成邀请码...');
-      final inviteRepo = ref.read(inviteRepositoryProvider);
-      final result = await inviteRepo.generateInviteCode();
-
-      if (result.isFailure) {
-        throw result.exceptionOrNull ?? Exception('生成邀请码失败');
-      }
-
-      final newCode = result.dataOrNull;
+      _logger.info('生成邀请码...');
+      final codeString = await XBoardSDK.instance.invite.generateInviteCode();
+      
+      // SDK returns String, we need to wrap it or reload data
+      // Assuming generateInviteCode returns the code string
+      // But DomainInviteCode is an object.
+      // We should reload invite data to get the new code in the list.
+      // 更新本地状态
+      final newInviteCode = DomainInviteCode(
+        code: codeString,
+        status: 0,
+        createdAt: DateTime.now(),
+      );
       await loadInviteData();
 
       state = state.copyWith(isGenerating: false);
-      _logger.info('邀请码生成成功: $newCode');
-      return newCode;
+      _logger.info('邀请码生成成功: $newInviteCode');
+      return newInviteCode;
     } catch (e) {
       _logger.info('生成邀请码失败: $e');
       state = state.copyWith(
@@ -225,14 +216,19 @@ class InviteNotifier extends Notifier<InviteState> {
 
     try {
       _logger.info('提现佣金: 方式=$withdrawMethod, 账号=$withdrawAccount');
-      final inviteRepo = ref.read(inviteRepositoryProvider);
-      final result = await inviteRepo.withdrawCommission(
+      final availableAmount = state.inviteData?.stats.availableCommission ?? 0.0;
+      if (availableAmount <= 0) {
+        throw Exception('可提现金额不足');
+      }
+
+      final success = await XBoardSDK.instance.invite.withdrawCommission(
+        amount: availableAmount,
         method: withdrawMethod,
-        account: withdrawAccount,
+        params: {'account': withdrawAccount},
       );
 
-      if (result.isFailure) {
-        throw result.exceptionOrNull ?? Exception('提现申请失败');
+      if (!success) {
+        throw Exception('提现申请失败');
       }
 
       await loadInviteData();
@@ -258,11 +254,10 @@ class InviteNotifier extends Notifier<InviteState> {
     
     try {
       _logger.info('划转佣金到钱包: ¥$amount');
-      final inviteRepo = ref.read(inviteRepositoryProvider);
-      final result = await inviteRepo.transferCommissionToBalance(amount);
+      final success = await XBoardSDK.instance.invite.transferCommissionToBalance(amount);
       
-      if (result.isFailure) {
-        throw result.exceptionOrNull ?? Exception('划转失败');
+      if (!success) {
+        throw Exception('划转失败');
       }
       
       await Future.wait([
@@ -305,4 +300,57 @@ final inviteProvider = NotifierProvider<InviteNotifier, InviteState>(
 extension InviteHelpers on WidgetRef {
   InviteState get inviteState => read(inviteProvider);
   InviteNotifier get inviteNotifier => read(inviteProvider.notifier);
+}
+
+DomainInvite _mapInviteInfo(InviteInfoModel info) {
+  return DomainInvite(
+    codes: info.codes.map(_mapInviteCode).toList(),
+    stats: InviteStats(
+      invitedCount: info.totalInvites,
+      totalCommission: info.totalCommission / 100.0,
+      pendingCommission: info.pendingCommission / 100.0,
+      commissionRate: info.commissionRatePercent,  // 已经是百分比，不需要再除以 100
+      availableCommission: info.availableCommission / 100.0,
+    ),
+  );
+}
+
+DomainInviteCode _mapInviteCode(InviteCodeModel code) {
+  return DomainInviteCode(
+    code: code.code,
+    status: code.status ? 0 : 1, // true=active(0), false=inactive(1)
+    createdAt: code.createdAt,
+  );
+}
+
+DomainCommission _mapCommission(CommissionDetailModel item) {
+  return DomainCommission(
+    id: item.id,
+    tradeNo: item.tradeNo,
+    amount: item.getAmount / 100.0,
+    createdAt: item.createdAt,
+  );
+}
+
+DomainUser _mapUser(UserModel user) {
+  return DomainUser(
+    email: user.email,
+    uuid: user.uuid,
+    avatarUrl: user.avatarUrl,
+    planId: user.planId,
+    transferLimit: user.transferEnable.toInt(),
+    uploadedBytes: 0,
+    downloadedBytes: 0,
+    balanceInCents: (user.balance * 100).toInt(),
+    commissionBalanceInCents: (user.commissionBalance * 100).toInt(),
+    expiredAt: user.expiredAt,
+    lastLoginAt: user.lastLoginAt,
+    createdAt: user.createdAt,
+    banned: user.banned,
+    remindExpire: user.remindExpire,
+    remindTraffic: user.remindTraffic,
+    discount: user.discount,
+    commissionRate: user.commissionRate,
+    telegramId: user.telegramId,
+  );
 }

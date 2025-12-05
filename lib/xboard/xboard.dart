@@ -12,8 +12,21 @@ export 'infrastructure/infrastructure.dart';
 // ========== Config 配置模块 ==========
 export 'config/xboard_config.dart';
 
-// ========== SDK 封装层 ==========
-export 'sdk/xboard_sdk.dart';
+// ========== SDK适配层 ==========
+export 'adapter/initialization/sdk_provider.dart';
+
+// 新的状态管理层（推荐使用）
+export 'adapter/state/user_state.dart';
+export 'adapter/state/subscription_state.dart';
+export 'adapter/state/order_state.dart';
+export 'adapter/state/plan_state.dart';
+export 'adapter/state/notice_state.dart';
+export 'adapter/state/ticket_state.dart';
+export 'adapter/state/invite_state.dart';
+export 'adapter/state/payment_state.dart';
+export 'adapter/state/config_state.dart';
+
+
 
 // 注意：SubscriptionInfo从SDK层导出，不要从Config层重复导出
 

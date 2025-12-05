@@ -3,7 +3,8 @@ import 'package:fl_clash/xboard/features/auth/auth.dart';
 import 'package:fl_clash/xboard/features/auth/providers/xboard_user_provider.dart';
 import 'package:fl_clash/xboard/core/core.dart';
 import 'package:fl_clash/xboard/domain/domain.dart';
-import 'package:fl_clash/xboard/infrastructure/providers/repository_providers.dart';
+import 'package:flutter_xboard_sdk/flutter_xboard_sdk.dart';
+import 'package:fl_clash/xboard/adapter/state/plan_state.dart';
 
 // 初始化文件级日志器
 final _logger = FileLogger('xboard_subscription_provider.dart');
@@ -34,14 +35,9 @@ class XBoardSubscriptionNotifier extends Notifier<List<DomainPlan>> {
     ref.read(userUIStateProvider.notifier).state = const UIState(isLoading: true);
     try {
       _logger.info('开始加载套餐列表...');
-      final planRepo = ref.read(planRepositoryProvider);
-      final result = await planRepo.getPlans();
-      
-      if (result.isFailure) {
-        throw result.exceptionOrNull ?? Exception('加载套餐列表失败');
-      }
-      
-      final plans = result.dataOrNull ?? [];
+      _logger.info('开始加载套餐列表...');
+      final planModels = await ref.read(getPlansProvider.future);
+      final plans = planModels.map(_mapPlan).toList();
       final visiblePlans = plans.where((plan) => plan.isVisible).toList();
       // 按 sort 字段排序（升序），null 值排在最后
       visiblePlans.sort((a, b) {
@@ -129,3 +125,29 @@ final xboardRecommendedPlansProvider = Provider<List<DomainPlan>>((ref) {
   final plans = ref.watch(xboardSubscriptionProvider);
   return plans.where((plan) => plan.isVisible && plan.hasPrice).take(3).toList();
 });
+
+DomainPlan _mapPlan(PlanModel plan) {
+  return DomainPlan(
+    id: plan.id,
+    name: plan.name,
+    groupId: plan.groupId,
+    transferQuota: plan.transferEnable.toInt(),
+    description: plan.content,
+    tags: plan.tags ?? [],
+    speedLimit: plan.speedLimit,
+    deviceLimit: plan.deviceLimit,
+    isVisible: plan.show,
+    renewable: plan.renew,
+    sort: plan.sort,
+    onetimePrice: plan.onetimePrice,
+    monthlyPrice: plan.monthPrice,
+    quarterlyPrice: plan.quarterPrice,
+    halfYearlyPrice: plan.halfYearPrice,
+    yearlyPrice: plan.yearPrice,
+    twoYearPrice: plan.twoYearPrice,
+    threeYearPrice: plan.threeYearPrice,
+    resetPrice: plan.resetPrice,
+    createdAt: plan.createdAt != null ? DateTime.fromMillisecondsSinceEpoch(plan.createdAt! * 1000) : null,
+    updatedAt: plan.updatedAt != null ? DateTime.fromMillisecondsSinceEpoch(plan.updatedAt! * 1000) : null,
+  );
+}
