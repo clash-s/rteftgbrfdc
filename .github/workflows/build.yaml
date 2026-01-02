@@ -8,45 +8,28 @@ on:
 
 jobs:
   build:
-    name: Build for ${{ matrix.platform }} (${{ matrix.arch }})
+    name: Build for ${{ matrix.platform }}
     runs-on: ${{ matrix.os }}
     permissions:
-      contents: write
+      contents: write # 必须开启才能生成下载链接
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             platform: android
-            arch: arm64
           - os: windows-latest
             platform: windows
-            arch: amd64
           - os: macos-latest
             platform: macos
-            arch: arm64
           - os: ubuntu-latest
             platform: linux
-            arch: amd64
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           submodules: 'recursive'
-          fetch-depth: 0
-
-      # 基础环境安装
-      - if: matrix.platform == 'android'
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'zulu'
-          java-version: '17'
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '>=1.19'
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -54,60 +37,65 @@ jobs:
           flutter-version: '3.x'
           cache: true
 
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '>=1.19'
+
       - if: matrix.platform == 'linux'
-        name: Install Linux Dependencies
+        name: Install Linux Tools
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential clang cmake ninja-build pkg-config \
             libgtk-3-dev libayatana-appindicator3-dev libkeybinder-3.0-dev \
             liblzma-dev libsecret-1-dev libjsoncpp-dev libnm-dev fakeroot
 
-      # 关键修复：自动补全 pubspec.yaml 中提到的所有 assets 目录
-      - name: Fix Missing Directories
+      # 核心修复：清理并创建所有可能缺失的资源文件夹
+      - name: Fix Workspace Directories
         run: |
           chmod -R +x .
-          # 解析 pubspec.yaml 并创建所有 assets 下的目录
-          grep -o "assets/[a-zA-Z0-9_/]*" pubspec.yaml | xargs -I {} mkdir -p {}
-          # 确保关键目录一定存在
+          # 创建 pubspec.yaml 中提到的 cer 目录
           mkdir -p assets/cer
-          # 给一个空的标志文件防止某些打包工具报错
           touch assets/cer/.gitkeep
+          # 创建构建目录，防止权限或缺失报错
+          mkdir -p build/linux/x64/release/bundle
         shell: bash
 
-      - name: Generate Code
+      - name: Generate SDK Code
         run: |
-          cd lib/sdk/flutter_xboard_sdk
-          flutter pub get
+          cd lib/sdk/flutter_xboard_sdk && flutter pub get
           dart run build_runner build --delete-conflicting-outputs
-          cd ../../..
-          flutter pub get
+          cd ../../.. && flutter pub get
           dart run build_runner build --delete-conflicting-outputs
         shell: bash
 
-      - name: Build
+      - name: Build and Package
         env:
           CGO_ENABLED: 1
         run: |
           if [ "${{ matrix.platform }}" == "linux" ]; then
-            # 使用 fakeroot 处理 Linux 打包权限
-            fakeroot dart setup.dart linux --arch ${{ matrix.arch }}
+            # 使用 fakeroot 解决打包时的权限挂起问题
+            fakeroot dart setup.dart linux --arch amd64
           else
-            dart setup.dart ${{ matrix.platform }} --arch ${{ matrix.arch }}
+            dart setup.dart ${{ matrix.platform }}
           fi
         shell: bash
 
-      # 整理并发布：这步会自动在 Release 页面生成下载链接
-      - name: Create Release and Upload Assets
+      # 展现为下载链接的关键步骤
+      - name: Upload to Release
         uses: softprops/action-gh-release@v2
         if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
         with:
           tag_name: ${{ github.ref_name || 'latest-build' }}
           name: Release ${{ github.ref_name || 'Manual Build' }}
+          # 自动寻找所有可能的安装包格式
           files: |
             build/app/outputs/flutter-apk/*.apk
             build/windows/runner/Release/*.exe
-            build/linux/${{ matrix.arch }}/release/bundle/*.tar.gz
-            build/macos/Build/Products/Release/*.zip
+            build/linux/x64/release/bundle/*.tar.gz
+            dist/*.deb
+            dist/*.zip
+            dist/*.dmg
           fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
