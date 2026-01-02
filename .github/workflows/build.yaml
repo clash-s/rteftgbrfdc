@@ -3,14 +3,13 @@ name: build
 on:
   push:
     tags:
-      - 'v*' # 推送 v1.0.0 标签触发
-  workflow_dispatch: # 支持手动点击按钮触发
+      - 'v*'
+  workflow_dispatch:
 
 jobs:
   build:
     name: Build for ${{ matrix.platform }} (${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
-    # 必须开启写入权限，否则无法生成下载链接
     permissions:
       contents: write
     strategy:
@@ -37,20 +36,12 @@ jobs:
           submodules: 'recursive'
           fetch-depth: 0
 
-      # 1. 基础环境
+      # 基础环境安装
       - if: matrix.platform == 'android'
-        name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '17'
-
-      - if: matrix.platform == 'android'
-        name: Detect Android NDK
-        shell: bash
-        run: |
-          NDK_PATH=$(ls -d $ANDROID_SDK_ROOT/ndk/* | sort -V | tail -n 1)
-          echo "ANDROID_NDK_HOME=$NDK_PATH" >> $GITHUB_ENV
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -63,92 +54,60 @@ jobs:
           flutter-version: '3.x'
           cache: true
 
-      # 2. Linux 专项：补全打包工具链（解决 AppBuilder.build 报错）
       - if: matrix.platform == 'linux'
-        name: Install Linux Build & Pack Tools
+        name: Install Linux Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            build-essential clang cmake ninja-build pkg-config \
+          sudo apt-get install -y build-essential clang cmake ninja-build pkg-config \
             libgtk-3-dev libayatana-appindicator3-dev libkeybinder-3.0-dev \
-            liblzma-dev libsecret-1-dev libjsoncpp-dev libnm-dev \
-            fakeroot dpkg-dev binutils # 增加 fakeroot 和打包工具
+            liblzma-dev libsecret-1-dev libjsoncpp-dev libnm-dev fakeroot
 
-      # 3. macOS 专项
-      - if: matrix.platform == 'macos'
-        name: macOS Setup
-        run: |
-          sudo gem install cocoapods
-          flutter precache --macos
-
-      # 4. 预处理与代码生成
-      - name: Prepare and Generate Code
-        shell: bash
+      # 关键修复：自动补全 pubspec.yaml 中提到的所有 assets 目录
+      - name: Fix Missing Directories
         run: |
           chmod -R +x .
-          # SDK 目录生成
+          # 解析 pubspec.yaml 并创建所有 assets 下的目录
+          grep -o "assets/[a-zA-Z0-9_/]*" pubspec.yaml | xargs -I {} mkdir -p {}
+          # 确保关键目录一定存在
+          mkdir -p assets/cer
+          # 给一个空的标志文件防止某些打包工具报错
+          touch assets/cer/.gitkeep
+        shell: bash
+
+      - name: Generate Code
+        run: |
           cd lib/sdk/flutter_xboard_sdk
           flutter pub get
           dart run build_runner build --delete-conflicting-outputs
-          # 根目录生成
           cd ../../..
           flutter pub get
           dart run build_runner build --delete-conflicting-outputs
+        shell: bash
 
-      - if: matrix.platform == 'macos'
-        name: Install Pods
-        run: cd macos && pod install && cd ..
-
-      # 5. 执行构建
-      - name: Build Application
+      - name: Build
         env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
           CGO_ENABLED: 1
-        shell: bash
         run: |
-          if [ "${{ matrix.platform }}" == "android" ]; then
-            export PATH=$PATH:$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin
-            dart setup.dart android
-          elif [ "${{ matrix.platform }}" == "windows" ]; then
-            dart setup.dart windows --arch ${{ matrix.arch }}
-          elif [ "${{ matrix.platform }}" == "macos" ]; then
-            dart setup.dart macos --arch ${{ matrix.arch }}
-          elif [ "${{ matrix.platform }}" == "linux" ]; then
-            # 使用 fakeroot 包装构建过程，防止打包权限错误
-            fakeroot dart setup.dart linux --arch ${{ matrix.arch }}
-          fi
-
-      # 6. 收集产物
-      - name: Prepare Artifacts for Release
-        shell: bash
-        run: |
-          mkdir -p release_files
-          # Android APK
-          find build/app/outputs/flutter-apk/ -name "*.apk" -exec cp {} release_files/ \; || true
-          # Windows EXE
-          find build/windows/runner/Release/ -name "*.exe" -exec cp {} release_files/ \; || true
-          # macOS ZIP
-          if [ "${{ matrix.platform }}" == "macos" ]; then
-            cd build/macos/Build/Products/Release/
-            zip -r ../../../../release_files/xboard-macos-${{ matrix.arch }}.zip *.app
-            cd ../../../..
-          fi
-          # Linux Tarball/Deb
           if [ "${{ matrix.platform }}" == "linux" ]; then
-            # 尝试打包 bundle
-            tar -czvf release_files/xboard-linux-${{ matrix.arch }}.tar.gz -C build/linux/${{ matrix.arch }}/release/bundle/ . || true
-            # 如果生成了 .deb 文件，也一并抓取
-            find build/linux/ -name "*.deb" -exec cp {} release_files/ \; || true
+            # 使用 fakeroot 处理 Linux 打包权限
+            fakeroot dart setup.dart linux --arch ${{ matrix.arch }}
+          else
+            dart setup.dart ${{ matrix.platform }} --arch ${{ matrix.arch }}
           fi
+        shell: bash
 
-      # 7. 发布并展现下载链接
-      - name: Create Release and Upload
+      # 整理并发布：这步会自动在 Release 页面生成下载链接
+      - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
         with:
-          files: release_files/*
           tag_name: ${{ github.ref_name || 'latest-build' }}
           name: Release ${{ github.ref_name || 'Manual Build' }}
-          generate_release_notes: true
+          files: |
+            build/app/outputs/flutter-apk/*.apk
+            build/windows/runner/Release/*.exe
+            build/linux/${{ matrix.arch }}/release/bundle/*.tar.gz
+            build/macos/Build/Products/Release/*.zip
+          fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
