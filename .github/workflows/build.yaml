@@ -3,8 +3,8 @@ name: build
 on:
   push:
     tags:
-      - 'v*' # 当你推送以 v 开头的标签（如 v1.0.0）时触发发布
-  workflow_dispatch: # 支持手动触发并发布
+      - 'v*' # 推送 v1.0.0 等标签触发
+  workflow_dispatch: # 支持手动点击按钮触发
 
 jobs:
   build:
@@ -34,6 +34,7 @@ jobs:
           submodules: 'recursive'
           fetch-depth: 0
 
+      # 1. 设置 Java (仅 Android)
       - if: matrix.platform == 'android'
         name: Setup Java
         uses: actions/setup-java@v4
@@ -41,32 +42,31 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
+      # 2. 探测预装的 NDK 路径 (解决 setup-ndk 找不到的问题)
       - if: matrix.platform == 'android'
-        name: Setup NDK
-        uses: nndung179/setup-ndk@v1
-        id: setup-ndk
-        with:
-          ndk-version: r25c
+        name: Detect Android NDK
+        shell: bash
+        run: |
+          # 自动寻找系统预装的最新的 NDK 版本
+          NDK_PATH=$(ls -d $ANDROID_SDK_ROOT/ndk/* | sort -V | tail -n 1)
+          echo "ANDROID_NDK_HOME=$NDK_PATH" >> $GITHUB_ENV
+          echo "Detected NDK at: $NDK_PATH"
 
+      # 3. 设置 Go
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: '>=1.19'
 
+      # 4. 设置 Flutter
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.x'
           cache: true
 
-      - if: matrix.platform == 'macos'
-        name: macOS Specific Setup
-        run: |
-          sudo gem install cocoapods
-          flutter precache --macos
-        shell: bash
-
-      - if: runner.os == 'Linux'
+      # 5. Linux 系统依赖
+      - if: matrix.platform == 'linux'
         name: Install Linux dependencies
         run: |
           sudo apt-get update
@@ -75,13 +75,24 @@ jobs:
             libgtk-3-dev libayatana-appindicator3-dev libkeybinder-3.0-dev \
             liblzma-dev libsecret-1-dev libjsoncpp-dev
 
+      # 6. macOS 系统依赖与权限
+      - if: matrix.platform == 'macos'
+        name: macOS Setup
+        run: |
+          sudo gem install cocoapods
+          flutter precache --macos
+          chmod +x .flutter-git/bin/internal/shared.sh || true
+
+      # 7. 准备与权限修复
       - name: Prepare and Permissions
+        shell: bash
         run: |
           chmod -R +x .
           flutter pub get
-        shell: bash
 
+      # 8. 生成 SDK 代码 (按文档要求的两步走)
       - name: Generate SDK Code
+        shell: bash
         run: |
           cd lib/sdk/flutter_xboard_sdk
           flutter pub get
@@ -89,52 +100,53 @@ jobs:
           cd ../../..
           flutter pub get
           dart run build_runner build --delete-conflicting-outputs
-        shell: bash
 
+      # 9. macOS Pod 安装
       - if: matrix.platform == 'macos'
         name: Install Pods
         run: |
           cd macos && pod install && cd ..
-        shell: bash
 
+      # 10. 执行构建
       - name: Build Application
         env:
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
           CGO_ENABLED: 1
+        shell: bash
         run: |
           if [ "${{ matrix.platform }}" == "android" ]; then
             export PATH=$PATH:$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin
             dart setup.dart android
           elif [ "${{ matrix.platform }}" == "windows" ]; then
+            # Windows 构建通常需要 MinGW，GitHub 镜像已自带
             dart setup.dart windows --arch ${{ matrix.arch }}
           elif [ "${{ matrix.platform }}" == "macos" ]; then
             dart setup.dart macos --arch ${{ matrix.arch }}
           elif [ "${{ matrix.platform }}" == "linux" ]; then
             dart setup.dart linux --arch ${{ matrix.arch }}
           fi
-        shell: bash
 
-      # 关键步骤：整理产物文件（为了方便展示下载链接）
+      # 11. 整理产物用于发布
       - name: Prepare Artifacts for Release
+        shell: bash
         run: |
           mkdir -p release_files
-          # 移动 Android APK
+          # Android APK
           find build/app/outputs/flutter-apk/ -name "*.apk" -exec cp {} release_files/ \; || true
-          # 移动 Windows EXE
+          # Windows EXE
           find build/windows/runner/Release/ -name "*.exe" -exec cp {} release_files/ \; || true
-          # 压缩 macOS App (macOS 必须压缩后下载)
+          # macOS ZIP
           if [ "${{ matrix.platform }}" == "macos" ]; then
             cd build/macos/Build/Products/Release/
-            zip -r ../../../../release_files/xboard-macos-${{ matrix.arch }}.app.zip *.app
+            zip -r ../../../../release_files/xboard-macos-${{ matrix.arch }}.zip *.app
             cd ../../../..
           fi
-          # 压缩 Linux Bundle
+          # Linux Tarball
           if [ "${{ matrix.platform }}" == "linux" ]; then
             tar -czvf release_files/xboard-linux-${{ matrix.arch }}.tar.gz -C build/linux/${{ matrix.arch }}/release/bundle/ .
           fi
-        shell: bash
 
-      # 关键步骤：上传到 GitHub Release 展现为下载链接
+      # 12. 上传到 Release 页面 (展现为下载链接)
       - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
