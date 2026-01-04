@@ -4,98 +4,52 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
   build:
-    name: Build for ${{ matrix.platform }}
-    runs-on: ${{ matrix.os }}
-    permissions:
-      contents: write # 必须开启才能生成下载链接
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            platform: android
-          - os: windows-latest
-            platform: windows
-          - os: macos-latest
-            platform: macos
-          - os: ubuntu-latest
-            platform: linux
-
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          submodules: 'recursive'
+          submodules: recursive
+
+      - name: Set up Java (for Android toolchain)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.x'
-          cache: true
+          flutter-version: 'stable'
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - name: Install Go
+        uses: actions/setup-go@v4
         with:
-          go-version: '>=1.19'
+          go-version: '1.20'
 
-      - if: matrix.platform == 'linux'
-        name: Install Linux Tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential clang cmake ninja-build pkg-config \
-            libgtk-3-dev libayatana-appindicator3-dev libkeybinder-3.0-dev \
-            liblzma-dev libsecret-1-dev libjsoncpp-dev libnm-dev fakeroot
+      - name: Flutter pub get
+        run: flutter pub get
 
-      # 核心修复：清理并创建所有可能缺失的资源文件夹
-      - name: Fix Workspace Directories
-        run: |
-          chmod -R +x .
-          # 创建 pubspec.yaml 中提到的 cer 目录
-          mkdir -p assets/cer
-          touch assets/cer/.gitkeep
-          # 创建构建目录，防止权限或缺失报错
-          mkdir -p build/linux/x64/release/bundle
-        shell: bash
+      - name: Run build_runner
+        run: dart run build_runner build --delete-conflicting-outputs
 
-      - name: Generate SDK Code
-        run: |
-          cd lib/sdk/flutter_xboard_sdk && flutter pub get
-          dart run build_runner build --delete-conflicting-outputs
-          cd ../../.. && flutter pub get
-          dart run build_runner build --delete-conflicting-outputs
-        shell: bash
+      - name: Analyze
+        run: flutter analyze
 
-      - name: Build and Package
-        env:
-          CGO_ENABLED: 1
-        run: |
-          if [ "${{ matrix.platform }}" == "linux" ]; then
-            # 使用 fakeroot 解决打包时的权限挂起问题
-            fakeroot dart setup.dart linux --arch amd64
-          else
-            dart setup.dart ${{ matrix.platform }}
-          fi
-        shell: bash
+      - name: Test
+        run: flutter test --coverage
 
-      # 展现为下载链接的关键步骤
-      - name: Upload to Release
-        uses: softprops/action-gh-release@v2
-        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+      # Optional: Build Android release and upload artifact
+      - name: Build Android release (optional)
+        run: dart setup.dart android
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ github.ref_name || 'latest-build' }}
-          name: Release ${{ github.ref_name || 'Manual Build' }}
-          # 自动寻找所有可能的安装包格式
-          files: |
-            build/app/outputs/flutter-apk/*.apk
-            build/windows/runner/Release/*.exe
-            build/linux/x64/release/bundle/*.tar.gz
-            dist/*.deb
-            dist/*.zip
-            dist/*.dmg
-          fail_on_unmatched_files: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: android-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
